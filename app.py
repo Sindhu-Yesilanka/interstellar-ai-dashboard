@@ -1,8 +1,25 @@
+# app.py — Interstellar-AI Space Mission Health Console (Cloud-safe)
+# ✅ No st.autorefresh
+# ✅ No infinite while True loop
+# ✅ Uses time.sleep + st.rerun (works on Streamlit Cloud)
+# ✅ Space theme + floating stars
+# ✅ Single Event Log (no duplicate)
+# ✅ Clean hero like EdgeYentra style (logo left, title/subtitle right)
+# ✅ Fixes deprecated use_column_width -> use_container_width
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 import random
+import time
 from datetime import datetime
+
+# =========================================================
+# SETTINGS
+# =========================================================
+REFRESH_SECONDS = 2          # auto update speed
+HISTORY_LEN = 40             # last N samples in chart
+ANOMALY_PROB = 0.12          # chance per tick (demo)
 
 # =========================================================
 # PAGE CONFIG
@@ -10,277 +27,316 @@ from datetime import datetime
 st.set_page_config(
     page_title="Interstellar-AI | Space Mission Console",
     page_icon="🚀",
-    layout="wide",
+    layout="wide"
 )
 
 # =========================================================
-# CSS — SPACE THEME + FLOATING STARS + EDGEYENTRA-STYLE HERO
+# CSS — STARFIELD + CONSOLE THEME
+# (No external star image dependency)
 # =========================================================
-st.markdown(
-    """
+st.markdown("""
 <style>
-/* ---- App Background ---- */
+/* Full app background */
 .stApp {
-    background: radial-gradient(1200px 700px at 50% -10%, #0c1f52 0%, #050915 45%, #000 100%);
-    color: #e5e7eb;
+    background: radial-gradient(circle at 30% 10%, #06163a 0%, #020615 40%, #000 100%);
 }
 
-/* Hide Streamlit default header spacing (removes that blank bar look) */
-header[data-testid="stHeader"] {visibility: hidden; height: 0px;}
-div.block-container {padding-top: 1.2rem; padding-bottom: 2.2rem;}
+/* Remove extra top padding */
+.block-container { padding-top: 1.25rem; }
 
-/* ---- Floating Stars (Pure CSS, no external image) ---- */
-@keyframes starFloat {
-  0%   {transform: translateY(0px);}
-  100% {transform: translateY(-1200px);}
+/* Star layers using CSS radial gradients */
+@keyframes drift {
+  from { transform: translateY(0px); }
+  to   { transform: translateY(-1200px); }
 }
 
-.stars, .stars2, .stars3 {
+.starfield, .starfield2, .starfield3 {
   position: fixed;
-  top: 0; left: 0;
-  width: 200%;
-  height: 200%;
-  z-index: -10;
+  inset: -100% -100% -100% -100%;
+  z-index: -1;
   background-repeat: repeat;
-  opacity: 0.7;
+  opacity: 0.8;
 }
 
-.stars {
+.starfield {
   background-image:
-    radial-gradient(2px 2px at 20px 30px, #ffffffaa 50%, transparent 51%),
-    radial-gradient(1px 1px at 100px 150px, #ffffff66 50%, transparent 51%),
-    radial-gradient(2px 2px at 300px 220px, #ffffff88 50%, transparent 51%),
-    radial-gradient(1px 1px at 400px 90px, #ffffff55 50%, transparent 51%),
-    radial-gradient(2px 2px at 520px 310px, #ffffffaa 50%, transparent 51%),
-    radial-gradient(1px 1px at 650px 170px, #ffffff66 50%, transparent 51%),
-    radial-gradient(2px 2px at 780px 260px, #ffffff99 50%, transparent 51%);
-  animation: starFloat 140s linear infinite;
+    radial-gradient(1px 1px at 20px 30px, rgba(255,255,255,.9) 50%, transparent 60%),
+    radial-gradient(1px 1px at 160px 80px, rgba(255,255,255,.8) 50%, transparent 60%),
+    radial-gradient(1px 1px at 320px 140px, rgba(255,255,255,.7) 50%, transparent 60%),
+    radial-gradient(1px 1px at 520px 260px, rgba(255,255,255,.7) 50%, transparent 60%),
+    radial-gradient(1px 1px at 740px 380px, rgba(255,255,255,.8) 50%, transparent 60%);
+  background-size: 900px 500px;
+  animation: drift 180s linear infinite;
 }
 
-.stars2 {
-  opacity: 0.45;
+.starfield2 {
+  opacity: 0.5;
   background-image:
-    radial-gradient(1px 1px at 40px 60px, #ffffff66 50%, transparent 51%),
-    radial-gradient(2px 2px at 220px 120px, #ffffff88 50%, transparent 51%),
-    radial-gradient(1px 1px at 360px 240px, #ffffff55 50%, transparent 51%),
-    radial-gradient(2px 2px at 560px 80px,  #ffffff99 50%, transparent 51%),
-    radial-gradient(1px 1px at 740px 300px, #ffffff66 50%, transparent 51%);
-  animation: starFloat 220s linear infinite;
+    radial-gradient(1px 1px at 60px 40px, rgba(160,220,255,.8) 50%, transparent 60%),
+    radial-gradient(1px 1px at 220px 120px, rgba(255,255,255,.6) 50%, transparent 60%),
+    radial-gradient(1px 1px at 480px 220px, rgba(255,255,255,.6) 50%, transparent 60%),
+    radial-gradient(1px 1px at 680px 340px, rgba(255,255,255,.7) 50%, transparent 60%);
+  background-size: 800px 450px;
+  animation: drift 260s linear infinite;
 }
 
-.stars3 {
+.starfield3 {
   opacity: 0.25;
   background-image:
-    radial-gradient(1px 1px at 90px 100px, #ffffff55 50%, transparent 51%),
-    radial-gradient(1px 1px at 280px 200px, #ffffff44 50%, transparent 51%),
-    radial-gradient(1px 1px at 470px 140px, #ffffff55 50%, transparent 51%),
-    radial-gradient(1px 1px at 690px 260px, #ffffff44 50%, transparent 51%);
-  animation: starFloat 320s linear infinite;
+    radial-gradient(2px 2px at 120px 90px, rgba(255,210,120,.6) 50%, transparent 60%),
+    radial-gradient(2px 2px at 360px 210px, rgba(255,255,255,.5) 50%, transparent 60%),
+    radial-gradient(2px 2px at 620px 330px, rgba(255,255,255,.5) 50%, transparent 60%);
+  background-size: 900px 550px;
+  animation: drift 340s linear infinite;
 }
 
-/* ---- Glass Panels ---- */
-.panel {
-  background: rgba(6, 10, 25, 0.55);
-  border: 1px solid rgba(90, 170, 255, 0.20);
-  box-shadow: 0 0 28px rgba(0, 178, 255, 0.12);
+/* Hero container (EdgeYentra style) */
+.hero-wrap{
+  padding: 26px 26px;
   border-radius: 18px;
-  padding: 18px 18px;
+  background: linear-gradient(135deg, rgba(9,18,48,.65), rgba(0,0,0,.65));
+  border: 1px solid rgba(80,160,255,.18);
+  box-shadow: 0 0 26px rgba(0,160,255,.12);
+  margin-bottom: 18px;
 }
 
-/* ---- HERO (EdgeYentra-like) ---- */
-.hero-wrap {
-  padding: 22px 18px;
-  border-radius: 22px;
-  background: linear-gradient(135deg, rgba(12,31,82,0.55), rgba(0,0,0,0.35));
-  border: 1px solid rgba(120, 200, 255, 0.18);
-  box-shadow: 0 0 38px rgba(0, 178, 255, 0.16);
+.hero-grid{
+  display:flex;
+  gap: 22px;
+  align-items:center;
 }
 
-.hero-title {
-  font-size: 44px;
+.hero-logo{
+  width: 140px;
+  height: 140px;
+  border-radius: 16px;
+  background: rgba(0,0,0,.35);
+  border: 1px solid rgba(255,255,255,.08);
+  box-shadow: 0 0 22px rgba(0,160,255,.10);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  overflow:hidden;
+  flex: 0 0 140px;
+}
+
+.hero-title{
+  font-size: 40px;
+  line-height: 1.1;
   font-weight: 900;
-  line-height: 1.05;
-  color: #f8fafc;
-  text-shadow: 0 0 26px rgba(0, 200, 255, 0.35);
+  color: #ffffff;
+  text-shadow: 0 0 18px rgba(0,180,255,.45);
+  margin-bottom: 8px;
 }
 
-.hero-sub {
-  margin-top: 10px;
+.hero-subtitle{
   font-size: 16px;
-  color: #cfe6ff;
-  max-width: 780px;
+  color: #cfe8ff;
+  margin-bottom: 14px;
+  max-width: 900px;
 }
 
-.hero-pill {
-  display: inline-block;
-  margin-top: 10px;
-  padding: 6px 12px;
+.badge-row{
+  display:flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.badge{
+  display:inline-flex;
+  align-items:center;
+  gap: 8px;
+  padding: 8px 12px;
   border-radius: 999px;
-  font-weight: 700;
   font-size: 12px;
-  color: #bfe8ff;
-  background: rgba(0, 120, 255, 0.18);
-  border: 1px solid rgba(0, 160, 255, 0.28);
+  font-weight: 700;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(2,6,23,.55);
+  color: #e5e7eb;
 }
 
-/* ---- Tags ---- */
-.tag {
-  padding: 7px 14px;
-  border-radius: 999px;
-  font-weight: 800;
-  font-size: 13px;
-  display: inline-block;
-  border: 1px solid transparent;
-}
+.badge-green{ border-color: rgba(45,180,92,.45); background: rgba(23,58,34,.55); color:#7CFFB0; }
+.badge-blue{ border-color: rgba(59,130,246,.45); background: rgba(7,25,55,.55); color:#BFD8FF; }
 
-.normal { background:#123821; color:#6bff9c; border-color:#2db45c;}
-.warn   { background:#33270c; color:#ffd65c; border-color:#ffb200;}
-.crit   { background:#3a0a0a; color:#ff8080; border-color:#ff2222;}
-.mode   { background:#020617; color:#e5e7eb; border-color:#4b5563;}
-
-/* ---- Telemetry Cards ---- */
-.telemetry {
-  padding: 18px;
+/* Cards */
+.card{
+  padding: 16px 18px;
   border-radius: 18px;
-  background: rgba(2, 6, 23, 0.55);
-  border: 1px solid rgba(0, 190, 255, 0.22);
-  box-shadow: 0 0 22px rgba(0, 178, 255, 0.10);
-  min-height: 110px;
+  background: rgba(3,11,24,.75);
+  border: 1px solid rgba(18,51,89,.95);
+  box-shadow: 0 0 22px rgba(4,189,255,.10);
 }
 
-.telemetry .label { color: #bfe8ff; font-weight: 800; }
-.telemetry .value { font-size: 34px; font-weight: 900; color: #ffffff; margin-top: 8px; }
+.metric-big{
+  font-size: 30px;
+  font-weight: 900;
+  color: white;
+  margin-top: 4px;
+}
 
-/* Make charts/dataframes blend */
-[data-testid="stDataFrame"] {border-radius: 14px; overflow: hidden;}
+.mini-label{
+  font-size: 12px;
+  color: #9ca3af;
+  margin-bottom: 2px;
+}
+
+.status-pill{
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 999px;
+  font-weight: 900;
+  text-align:center;
+  letter-spacing: .3px;
+  border: 1px solid rgba(255,255,255,.12);
+  margin-top: 6px;
+  margin-bottom: 8px;
+}
+
+.nominal{ background: rgba(23,58,34,.80); border-color: rgba(45,180,92,.50); color:#7CFFB0; }
+.warn{ background: rgba(51,39,12,.80); border-color: rgba(255,178,0,.55); color:#FFD65C; }
+.crit{ background: rgba(58,10,10,.80); border-color: rgba(255,64,64,.65); color:#FF8A8A; }
+
+.alertbox{
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,64,64,.65);
+  background: rgba(40,10,10,.75);
+  box-shadow: 0 0 18px rgba(255,64,64,.10);
+  margin-top: 10px;
+}
+
+.small-note{
+  color:#9ca3af;
+  font-size: 12px;
+}
 </style>
+""", unsafe_allow_html=True)
 
-<div class="stars"></div><div class="stars2"></div><div class="stars3"></div>
-""",
-    unsafe_allow_html=True,
-)
+# Starfield layers
+st.markdown('<div class="starfield"></div><div class="starfield2"></div><div class="starfield3"></div>',
+            unsafe_allow_html=True)
 
 # =========================================================
-# SESSION STATE
+# SESSION STATE INIT
 # =========================================================
-if "running" not in st.session_state:
-    st.session_state.running = True
+if "log" not in st.session_state:
+    st.session_state.log = []
 
 if "history" not in st.session_state:
     st.session_state.history = []
 
-if "log" not in st.session_state:
-    st.session_state.log = []
+if "running" not in st.session_state:
+    st.session_state.running = True
 
 if "last_values" not in st.session_state:
-    st.session_state.last_values = {"time": datetime.now().strftime("%H:%M:%S"), "Vbus": 50.0, "Temp": 28.0, "Wheel": 30.0}
+    st.session_state.last_values = {
+        "time": datetime.now().strftime("%H:%M:%S"),
+        "Vbus": 50.0,
+        "Temp": 75.0,
+        "Wheel": 30.0
+    }
 
 # =========================================================
-# SIDEBAR CONTROLS (Showcase friendly)
+# HERO (EdgeYentra-style)
 # =========================================================
-st.sidebar.title("⚙️ Demo Controls")
-st.sidebar.caption("Use these controls during expo to show anomalies.")
+st.markdown('<div class="hero-wrap"><div class="hero-grid">', unsafe_allow_html=True)
 
-st.session_state.running = st.sidebar.toggle("Run Live Demo", value=st.session_state.running)
-refresh_ms = st.sidebar.slider("Refresh speed (ms)", 300, 3000, 900, 100)
+# Left: logo
+st.markdown('<div class="hero-logo">', unsafe_allow_html=True)
+# Put your file in repo: logo.png
+try:
+    st.image("logo.png", width=140)
+except Exception:
+    st.markdown("<div class='small-note'>logo.png not found</div>", unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
 
-anomaly_prob = st.sidebar.slider("Anomaly probability", 0.00, 0.40, 0.12, 0.01)
-force_anomaly = st.sidebar.button("🚨 Force Anomaly Now")
+# Right: title/subtitle/badges
+st.markdown("""
+<div>
+  <div class="hero-title">Interstellar-AI Space Mission Health Console</div>
+  <div class="hero-subtitle">
+    AI-powered anomaly detection and predictive health monitoring for critical satellite subsystems — enabling faster,
+    safer, and more autonomous missions.
+  </div>
+  <div class="badge-row">
+    <div class="badge badge-blue">🛰️ Telemetry Console</div>
+    <div class="badge badge-green">🧠 AI Monitor ACTIVE</div>
+    <div class="badge">🧪 Demo Mode (Simulated Stream)</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
-st.sidebar.markdown("---")
-st.sidebar.caption("If Raspberry Pi payload is connected later, replace simulated values with sensor reads.")
-
-# Auto refresh (NO while True)
-st_autorefresh = st.experimental_data_editor if False else None  # dummy to keep lint calm
-count = st.autorefresh(interval=refresh_ms, key="autorefresh")
+st.markdown('</div></div>', unsafe_allow_html=True)
 
 # =========================================================
-# HERO SECTION (Edgeyentra style)
+# TOP INFO + CONTROLS
 # =========================================================
-left, right = st.columns([0.22, 0.78], vertical_alignment="center")
+info_left, info_mid, info_right = st.columns([1.3, 1, 1])
 
-with left:
-    # Fit logo neatly (avoid huge image)
-    st.image("logo.png", width=220)
-
-with right:
-    st.markdown('<div class="hero-wrap">', unsafe_allow_html=True)
-    st.markdown('<div class="hero-title">Interstellar-AI Space Mission Health Console</div>', unsafe_allow_html=True)
+with info_left:
     st.markdown(
-        '<div class="hero-sub">AI-powered anomaly detection & predictive health monitoring for satellite / HAB payload subsystems — enabling faster, safer, and more autonomous missions.</div>',
-        unsafe_allow_html=True,
+        "<div class='small-note'>"
+        "Mission: <b>VSAT-01</b> · Orbit: <b>LEO 500 km</b> · Ground Station: <b>SVECW</b><br>"
+        "Platform: <b>Interstellar-AI</b> — Autonomous anomaly detection (demo telemetry)"
+        "</div>",
+        unsafe_allow_html=True
     )
-    st.markdown('<span class="hero-pill">🧪 DEMO MODE • Simulated telemetry mapped to HAB-like ranges</span>', unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    if st.button("⏯ Pause / Resume Demo"):
+        st.session_state.running = not st.session_state.running
 
-st.markdown("")
-st.markdown(
-    '<div style="color:#9ca3af;font-size:13px;">'
-    'Mission: <b>VSAT-01</b> · Orbit: <b>LEO 500 km</b> · Ground Station: <b>SVECW</b> '
-    '· Platform: <b>Interstellar-AI</b>'
-    "</div>",
-    unsafe_allow_html=True,
-)
-st.markdown("")
-
-# =========================================================
-# TOP KPIs
-# =========================================================
-k1, k2, k3, k4 = st.columns([1.2, 1, 1, 1])
-
-with k1:
-    st.markdown('<div class="tag mode">🧪 DEMO MODE (Simulated Telemetry)</div>', unsafe_allow_html=True)
-
-with k2:
+with info_mid:
     snr = 17.0 + np.random.randn() * 0.6
-    st.metric("Downlink SNR", f"{snr:.1f} dB")
+    st.markdown("<div class='mini-label'>Downlink SNR</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-big'>{snr:.1f} dB</div>", unsafe_allow_html=True)
 
-with k3:
-    st.metric("Link Status", "LOCKED")
+with info_right:
+    st.markdown("<div class='mini-label'>Link Status</div>", unsafe_allow_html=True)
+    st.markdown("<div class='metric-big'>LOCKED</div>", unsafe_allow_html=True)
+    st.markdown("<div class='mini-label' style='margin-top:10px;'>AI Monitor</div>", unsafe_allow_html=True)
+    st.markdown("<div class='metric-big'>ACTIVE</div>", unsafe_allow_html=True)
 
-with k4:
-    st.metric("AI Monitor", "ACTIVE")
-
-st.markdown("")
+st.markdown("---")
 
 # =========================================================
-# TELEMETRY UPDATE (Simulated)
+# TELEMETRY UPDATE OR HOLD
 # =========================================================
-vals = st.session_state.last_values.copy()
-
 if st.session_state.running:
     timestamp = datetime.now().strftime("%H:%M:%S")
 
-    # “HAB-like” ranges (safe for demo): you can tune
-    # Voltage stable around 50V
-    Vbus = float(np.random.normal(50.0, 0.8))
-    # Temp around 25–35 baseline; occasional spikes
-    Temp = float(np.random.normal(28.0, 1.0))
-    # Wheel around 30 rpm
-    Wheel = float(np.random.normal(30.0, 0.9))
+    # Demo telemetry (you can map to HAB payload values later)
+    ch1 = np.random.normal(50, 1.0)   # Vbus
+    ch2 = np.random.normal(75, 1.2)   # Temp
+    ch3 = np.random.normal(30, 1.0)   # Wheel
 
-    vals = {"time": timestamp, "Vbus": Vbus, "Temp": Temp, "Wheel": Wheel}
-    st.session_state.last_values = vals
-    st.session_state.history.append(vals)
-    st.session_state.history = st.session_state.history[-40:]  # keep last N points
+    st.session_state.last_values = {"time": timestamp, "Vbus": float(ch1), "Temp": float(ch2), "Wheel": float(ch3)}
+    st.session_state.history.append(st.session_state.last_values)
+    st.session_state.history = st.session_state.history[-HISTORY_LEN:]
+else:
+    vals = st.session_state.last_values
+    timestamp = vals["time"]
+    ch1, ch2, ch3 = vals["Vbus"], vals["Temp"], vals["Wheel"]
 
 # =========================================================
-# ANOMALY LOGIC (Demo)
+# SIMPLE ANOMALY LOGIC (DEMO)
 # =========================================================
 anomaly = False
 severity = None
-faulty = None
+subsystem = None
+message = None
 
-if st.session_state.running:
-    if force_anomaly or (random.random() < anomaly_prob):
-        anomaly = True
-        faulty = random.choice(["Power Bus", "Thermal Control", "Reaction Wheel", "Comms Link"])
-        severity = random.choice(["Moderate", "Critical"])
+if st.session_state.running and random.random() < ANOMALY_PROB:
+    anomaly = True
+    subsystem = random.choice(["Power Bus", "Thermal Control", "Reaction Wheel"])
+    severity = random.choice(["Moderate", "Critical"])
+    message = f"{subsystem} anomaly detected"
 
-        st.session_state.log.append(
-            {"Time": vals["time"], "Subsystem": faulty, "Severity": severity, "Status": "Anomaly"}
-        )
-        st.session_state.log = st.session_state.log[-100:]  # cap log size
+    st.session_state.log.append({
+        "Time": timestamp,
+        "Subsystem": subsystem,
+        "Severity": severity,
+        "Status": "Anomaly"
+    })
+    st.session_state.log = st.session_state.log[-200:]  # keep last 200
 
 # =========================================================
 # MISSION STATUS
@@ -288,13 +344,20 @@ if st.session_state.running:
 st.subheader("🚀 Mission Status")
 
 if anomaly and severity == "Critical":
-    st.markdown('<div class="tag crit">🔴 EMERGENCY MODE: CRITICAL ANOMALY</div>', unsafe_allow_html=True)
+    st.markdown('<div class="status-pill crit">🔴 EMERGENCY MODE · CRITICAL ANOMALY</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="alertbox">🚨 <b>{message}</b> — Severity: <b>CRITICAL</b></div>',
+                unsafe_allow_html=True)
 elif anomaly:
-    st.markdown('<div class="tag warn">🟡 DEGRADED MODE: ANOMALY UNDER INVESTIGATION</div>', unsafe_allow_html=True)
+    st.markdown('<div class="status-pill warn">🟡 DEGRADED MODE · ANOMALY UNDER INVESTIGATION</div>',
+                unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="alertbox" style="border-color:rgba(255,178,0,.7);background:rgba(51,39,12,.75);">'
+        f'⚠️ <b>{message}</b> — Severity: <b>MODERATE</b></div>',
+        unsafe_allow_html=True
+    )
 else:
-    st.markdown('<div class="tag normal">🟢 NOMINAL MODE: ALL SUBSYSTEMS HEALTHY</div>', unsafe_allow_html=True)
-
-st.markdown("")
+    st.markdown('<div class="status-pill nominal">🟢 NOMINAL MODE · ALL SUBSYSTEMS HEALTHY</div>',
+                unsafe_allow_html=True)
 
 # =========================================================
 # LIVE TELEMETRY CARDS
@@ -302,66 +365,66 @@ st.markdown("")
 st.subheader("📡 Live Telemetry Feed")
 
 c1, c2, c3 = st.columns(3)
-
 with c1:
     st.markdown(
         f"""
-        <div class="telemetry">
-          <div class="label">🔌 Power Bus Voltage</div>
-          <div class="value">{vals["Vbus"]:.2f} V</div>
-          <div style="color:#94a3b8;font-size:12px;">Nominal window: 48–52 V</div>
+        <div class="card">
+          <div class="mini-label">🔌 Power Bus Voltage</div>
+          <div class="metric-big">{ch1:.2f} V</div>
+          <div class="small-note">Last update: {timestamp}</div>
         </div>
         """,
-        unsafe_allow_html=True,
+        unsafe_allow_html=True
     )
 
 with c2:
     st.markdown(
         f"""
-        <div class="telemetry">
-          <div class="label">🌡 Battery / Payload Temperature</div>
-          <div class="value">{vals["Temp"]:.2f} °C</div>
-          <div style="color:#94a3b8;font-size:12px;">Nominal window: 20–40 °C</div>
+        <div class="card">
+          <div class="mini-label">🌡 Battery Temperature</div>
+          <div class="metric-big">{ch2:.2f} °C</div>
+          <div class="small-note">Thermal safety indicator</div>
         </div>
         """,
-        unsafe_allow_html=True,
+        unsafe_allow_html=True
     )
 
 with c3:
     st.markdown(
         f"""
-        <div class="telemetry">
-          <div class="label">🌀 Reaction Wheel Speed</div>
-          <div class="value">{vals["Wheel"]:.2f} rpm</div>
-          <div style="color:#94a3b8;font-size:12px;">Nominal window: 25–35 rpm</div>
+        <div class="card">
+          <div class="mini-label">🌀 Reaction Wheel Speed</div>
+          <div class="metric-big">{ch3:.2f} rpm</div>
+          <div class="small-note">Attitude control health</div>
         </div>
         """,
-        unsafe_allow_html=True,
+        unsafe_allow_html=True
     )
-
-st.markdown("")
 
 # =========================================================
 # TREND CHART
 # =========================================================
-st.subheader("📈 Recent Telemetry Trend (last samples)")
-
-if len(st.session_state.history) > 2:
-    hist_df = pd.DataFrame(st.session_state.history)
-    hist_df = hist_df.set_index("time")
+st.subheader(f"📈 Recent Telemetry Trend (last {HISTORY_LEN} samples)")
+if len(st.session_state.history) > 1:
+    hist_df = pd.DataFrame(st.session_state.history).set_index("time")
+    # Better labels for chart
+    hist_df = hist_df.rename(columns={"Vbus": "Power Bus (V)", "Temp": "Battery Temp (°C)", "Wheel": "Wheel (rpm)"})
     st.line_chart(hist_df, height=260, use_container_width=True)
 else:
     st.info("Trend will appear as telemetry accumulates...")
 
-st.markdown("")
-
 # =========================================================
-# EVENT LOG (ONLY ONCE)
+# EVENT LOG (ONLY ONCE — fixes “why 2 times”)
 # =========================================================
 st.subheader("📜 Anomaly Event Log")
-
 if len(st.session_state.log) > 0:
-    df_log = pd.DataFrame(st.session_state.log)[::-1]
-    st.dataframe(df_log, use_container_width=True, height=280)
+    df_log = pd.DataFrame(st.session_state.log)
+    st.dataframe(df_log.iloc[::-1], use_container_width=True, height=280)
 else:
-    st.info("No anomalies detected yet. Use 'Force Anomaly Now' from sidebar for demo.")
+    st.info("No anomalies detected yet.")
+
+# =========================================================
+# AUTO REFRESH (Cloud-safe)
+# =========================================================
+time.sleep(REFRESH_SECONDS)
+st.rerun()

@@ -1,9 +1,9 @@
-# app.py — Interstellar-AI Space Mission Health Console (HAB-style Telemetry Demo)
-# ✅ No while True loop (cloud-safe)
-# ✅ No st.autorefresh (fixes your Streamlit Cloud error)
-# ✅ No duplicate event-log rendering
-# ✅ EdgeYentra-style hero layout + floating star background
-# ✅ HAB telemetry parameters: Altitude, Temperature, Pressure, Humidity (+ SNR, Link)
+# app.py — Interstellar-AI Space Mission Health Console (Cloud-safe)
+# ✅ No while True loop
+# ✅ No st.autorefresh
+# ✅ Session-state safe (no AttributeError)
+# ✅ HAB-style telemetry: Altitude, Temp, Pressure, Humidity + SNR/Link
+# ✅ Floating star background + hero layout + single event log
 
 import streamlit as st
 import pandas as pd
@@ -22,28 +22,21 @@ st.set_page_config(
 )
 
 # =========================================================
-# THEME + STARFIELD CSS
+# CSS — SPACE THEME + FLOATING STARS
 # =========================================================
 STAR_CSS = """
 <style>
-/* App background */
 .stApp{
   background: radial-gradient(1200px 600px at 50% 0%, rgba(40,90,255,.18), rgba(0,0,0,0) 65%),
               linear-gradient(180deg, #020617 0%, #000000 70%);
   color: #e5e7eb;
 }
-
-/* Remove extra top padding */
 .block-container{ padding-top: 1.2rem; }
 
-/* Floating stars (pure CSS, no external image) */
 @keyframes drift1 { from {transform: translateY(0);} to {transform: translateY(-1200px);} }
 @keyframes drift2 { from {transform: translateY(0);} to {transform: translateY(-900px);} }
-@keyframes twinkle { 0%,100% {opacity:.7;} 50% {opacity:1;} }
 
-.starwrap{
-  position: fixed; inset: 0; z-index: -1; overflow: hidden;
-}
+.starwrap{ position: fixed; inset: 0; z-index: -1; overflow: hidden; }
 .stars, .stars2{
   position: absolute; inset: -200% -50% -200% -50%;
   background-repeat: repeat;
@@ -51,8 +44,6 @@ STAR_CSS = """
   animation-iteration-count: infinite;
   filter: drop-shadow(0 0 2px rgba(120,220,255,.35));
 }
-
-/* Two layers of radial-gradient “dots” */
 .stars{
   background-image:
     radial-gradient(1px 1px at 20px 30px, rgba(255,255,255,.85) 50%, transparent 55%),
@@ -78,7 +69,6 @@ STAR_CSS = """
   opacity: .55;
 }
 
-/* Hero (EdgeYentra-like) */
 .hero{
   border-radius: 18px;
   padding: 26px 28px;
@@ -106,7 +96,6 @@ STAR_CSS = """
   color: rgba(220,240,255,.65);
 }
 
-/* “Pills” */
 .pill{
   display:inline-flex;
   align-items:center;
@@ -123,7 +112,6 @@ STAR_CSS = """
 .pill-crit{ background: rgba(239,68,68,.16); color: #FFC0C0; border-color: rgba(239,68,68,.55); }
 .pill-mode{ background: rgba(148,163,184,.12); color: rgba(255,255,255,.86); border-color: rgba(148,163,184,.35); }
 
-/* Telemetry cards */
 .card{
   border-radius: 18px;
   padding: 16px 18px;
@@ -150,7 +138,6 @@ STAR_CSS = """
   margin-top: 6px;
 }
 
-/* Make Streamlit metrics darker */
 [data-testid="stMetric"]{
   background: rgba(2,6,23,.35);
   border: 1px solid rgba(90,160,255,.14);
@@ -161,6 +148,25 @@ STAR_CSS = """
 """
 st.markdown(STAR_CSS, unsafe_allow_html=True)
 st.markdown('<div class="starwrap"><div class="stars"></div><div class="stars2"></div></div>', unsafe_allow_html=True)
+
+# =========================================================
+# SESSION STATE (SAFE INIT)
+# =========================================================
+st.session_state.setdefault("running", True)
+st.session_state.setdefault("tick", 0)
+st.session_state.setdefault("history", [])
+st.session_state.setdefault("log", [])
+st.session_state.setdefault(
+    "last",
+    {
+        "time": datetime.now().strftime("%H:%M:%S"),
+        "Altitude_m": 0.0,
+        "Temp_C": 28.0,
+        "Pressure_hPa": 1013.0,
+        "Humidity_pct": 60.0,
+        "SNR_dB": 18.0,
+    },
+)
 
 # =========================================================
 # SIDEBAR CONTROLS
@@ -174,35 +180,9 @@ with st.sidebar:
     max_hist = st.slider("History window (samples)", 20, 120, 60, 10)
 
 # =========================================================
-# SESSION STATE INIT
-# =========================================================
-if "running" not in st.session_state:
-    st.session_state.running = True
-if "tick" not in st.session_state:
-    st.session_state.tick = 0
-if "history" not in st.session_state:
-    st.session_state.history = []
-if "log" not in st.session_state:
-    st.session_state.log = []
-if "last" not in st.session_state:
-    st.session_state.last = {
-        "time": datetime.now().strftime("%H:%M:%S"),
-        "Altitude_m": 0.0,
-        "Temp_C": 28.0,
-        "Pressure_hPa": 1013.0,
-        "Humidity_pct": 60.0,
-        "SNR_dB": 18.0
-    }
-
-# =========================================================
 # HELPERS
 # =========================================================
 def hab_profile(t: int) -> float:
-    """
-    Simple HAB-like altitude profile:
-    - ascend to ~30km, short float, then descend
-    """
-    # total “mission” length in ticks (roughly)
     ascend = 90
     floatp = 20
     descend = 90
@@ -216,20 +196,13 @@ def hab_profile(t: int) -> float:
         return max(0.0, 30000.0 * (1 - td / descend))
     return 0.0
 
-def simulate_telemetry(tick: int, last: dict) -> dict:
+def simulate_telemetry(tick: int) -> dict:
     alt = hab_profile(tick) + np.random.randn() * 120.0
     alt = max(0.0, alt)
 
-    # temperature decreases with altitude (very rough)
     temp = 28.0 - (alt / 1000.0) * 2.0 + np.random.randn() * 0.6
-
-    # pressure decreases exponentially with altitude (rough)
     pressure = 1013.25 * np.exp(-alt / 7500.0) + np.random.randn() * 2.0
-
-    # humidity generally drops with altitude
     humidity = max(0.0, 65.0 - (alt / 1000.0) * 1.2 + np.random.randn() * 1.0)
-
-    # link SNR (simulate small variation + occasional dips)
     snr = 18.0 + np.random.randn() * 0.8
 
     return {
@@ -242,23 +215,18 @@ def simulate_telemetry(tick: int, last: dict) -> dict:
     }
 
 def detect_anomaly(sample: dict) -> tuple[bool, str, str, str]:
-    """
-    Demo anomaly rules (for expo):
-    returns: (is_anom, subsystem, severity, message)
-    """
     alt = sample["Altitude_m"]
     temp = sample["Temp_C"]
     pres = sample["Pressure_hPa"]
     hum = sample["Humidity_pct"]
     snr = sample["SNR_dB"]
 
-    # expected ranges (loose, demo-safe)
     issues = []
 
     if temp > 35 or temp < -60:
         issues.append(("Thermal", "Critical", f"Temperature out-of-range: {temp:.1f} °C"))
     elif temp > 32 or temp < -45:
-        issues.append(("Thermal", "Moderate", f"Temperature drift detected: {temp:.1f} °C"))
+        issues.append(("Thermal", "Moderate", f"Temperature drift: {temp:.1f} °C"))
 
     if pres < 3 and alt < 1000:
         issues.append(("Pressure Sensor", "Critical", f"Pressure invalid at low altitude: {pres:.1f} hPa"))
@@ -274,19 +242,17 @@ def detect_anomaly(sample: dict) -> tuple[bool, str, str, str]:
         issues.append(("Comms Link", "Moderate", f"Downlink SNR degraded: {snr:.1f} dB"))
 
     if not issues:
-        return (False, "", "", "")
+        return False, "", "", ""
 
-    # take highest severity (Critical > Moderate)
     issues_sorted = sorted(issues, key=lambda x: 0 if x[1] == "Critical" else 1)
     subsystem, severity, msg = issues_sorted[0]
-    return (True, subsystem, severity, msg)
+    return True, subsystem, severity, msg
 
 # =========================================================
-# HERO (EdgeYentra-like layout, no empty top bar)
+# HERO (LEFT LOGO + RIGHT TITLE LIKE EDGEYENTRA)
 # =========================================================
 hero_left, hero_right = st.columns([1.1, 2.4], vertical_alignment="center")
 with hero_left:
-    # logo (no use_column_width to avoid warning)
     try:
         st.image("logo.png", width=210)
     except Exception:
@@ -297,81 +263,76 @@ with hero_right:
     st.markdown('<div class="hero-title">Interstellar-AI Space Mission Health Console</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="hero-subtitle">'
-        'AI-powered anomaly detection & predictive health monitoring for critical payload / satellite subsystems — '
-        'demonstrated using HAB-style telemetry (Altitude, Temperature, Pressure, Humidity) + Link SNR.'
+        'AI-powered anomaly detection & predictive health monitoring for payload/satellite subsystems — '
+        'demo using HAB-style telemetry + Link SNR.'
         '</div>',
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
     st.markdown(
         '<div class="mini">'
-        'Mission: <b>SVECW HAB / VSAT-01 Demo</b> · Orbit/Flight: <b>LEO / High-Altitude Profile</b> · Ground Station: <b>SVECW</b>'
+        'Mission: <b>SVECW HAB / VSAT-01 Demo</b> · Ground Station: <b>SVECW</b> · '
+        'Mode: <b>Expo Prototype</b>'
         '</div>',
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
-    btn1, btn2, btn3 = st.columns([1.2, 1.1, 1.1])
-    with btn1:
+    b1, b2, b3 = st.columns([1.2, 1.1, 1.1])
+    with b1:
         if st.button("⏯ Pause / Resume Demo", use_container_width=True):
-            st.session_state.running = not st.session_state.running
-    with btn2:
+            st.session_state["running"] = not st.session_state["running"]
+    with b2:
         if st.button("🔁 Reset Demo", use_container_width=True):
-            st.session_state.tick = 0
-            st.session_state.history = []
-            st.session_state.log = []
-    with btn3:
-        st.markdown('<div class="pill pill-mode">🧪 DEMO MODE: Simulated Telemetry</div>', unsafe_allow_html=True)
+            st.session_state["tick"] = 0
+            st.session_state["history"] = []
+            st.session_state["log"] = []
+    with b3:
+        st.markdown('<div class="pill pill-mode">🧪 DEMO MODE</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 # =========================================================
-# TOP STATUS METRICS
+# UPDATE / HOLD SAMPLE
 # =========================================================
-top1, top2, top3, top4 = st.columns([1.1, 1.0, 1.0, 1.2])
-
-# update / hold
 if demo_mode == "Hold last values":
-    sample = st.session_state.last
+    sample = st.session_state.get("last")
 else:
-    if st.session_state.running:
-        st.session_state.tick += 1
-        sample = simulate_telemetry(st.session_state.tick, st.session_state.last)
-        st.session_state.last = sample
+    if st.session_state.get("running", True):
+        st.session_state["tick"] = int(st.session_state.get("tick", 0)) + 1
+        sample = simulate_telemetry(st.session_state["tick"])
+        st.session_state["last"] = sample
     else:
-        sample = st.session_state.last
+        sample = st.session_state.get("last")
 
-# decide link status
+# Link / Phase
 snr = sample["SNR_dB"]
 link_status = "LOCKED" if snr >= 10 else "DEGRADED" if snr >= 7 else "UNLOCKED"
 
-# mission phase (from altitude)
 alt = sample["Altitude_m"]
-if alt < 500 and st.session_state.tick < 5:
+tick = int(st.session_state.get("tick", 0))
+if alt < 500 and tick < 5:
     phase = "PRE-LAUNCH"
-elif alt < 500 and st.session_state.tick > 160:
+elif alt < 500 and tick > 160:
     phase = "RECOVERY"
 elif alt >= 29000:
     phase = "PEAK ALTITUDE"
-elif st.session_state.tick <= 90:
+elif tick <= 90:
     phase = "ASCENT"
 else:
     phase = "DESCENT"
 
-with top1:
-    st.metric("Mission Phase", phase)
-with top2:
-    st.metric("Downlink SNR", f"{snr:.1f} dB")
-with top3:
-    st.metric("Link Status", link_status)
-with top4:
-    st.metric("AI Monitor", "ACTIVE" if st.session_state.running else "PAUSED")
+# Top Metrics
+m1, m2, m3, m4 = st.columns([1.1, 1.0, 1.0, 1.2])
+with m1: st.metric("Mission Phase", phase)
+with m2: st.metric("Downlink SNR", f"{snr:.1f} dB")
+with m3: st.metric("Link Status", link_status)
+with m4: st.metric("AI Monitor", "ACTIVE" if st.session_state.get("running", True) else "PAUSED")
 
 # =========================================================
-# ANOMALY CHECK (controlled by anomaly_rate + rules)
+# ANOMALY
 # =========================================================
 is_anom, subsystem, severity, msg = detect_anomaly(sample)
 
-# add “random trigger” anomalies for expo effect (optional)
-if st.session_state.running and np.random.rand() < anomaly_rate:
-    # force a visible anomaly occasionally
+# Optional: inject occasional anomaly for expo
+if st.session_state.get("running", True) and np.random.rand() < anomaly_rate:
     forced = np.random.choice(["Thermal", "Comms Link", "Pressure Sensor", "Humidity Sensor"])
     if forced == "Thermal":
         severity = np.random.choice(["Moderate", "Critical"])
@@ -388,26 +349,29 @@ if st.session_state.running and np.random.rand() < anomaly_rate:
     subsystem = forced
     is_anom = True
 
-# event log update (avoid spamming every refresh)
-if is_anom and st.session_state.running:
-    if len(st.session_state.log) == 0 or st.session_state.log[-1]["Message"] != msg:
-        st.session_state.log.append({
+# Log anomaly once (avoid spamming duplicates)
+if is_anom and st.session_state.get("running", True):
+    log_list = st.session_state.get("log", [])
+    last_msg = log_list[-1]["Message"] if len(log_list) else None
+    if last_msg != msg:
+        log_list.append({
             "Time": sample["time"],
             "Subsystem": subsystem,
             "Severity": severity,
             "Message": msg,
             "Status": "Anomaly"
         })
+        st.session_state["log"] = log_list
 
-# history update
-st.session_state.history.append(sample)
-st.session_state.history = st.session_state.history[-max_hist:]
+# History
+hist = st.session_state.get("history", [])
+hist.append(sample)
+st.session_state["history"] = hist[-max_hist:]
 
 # =========================================================
-# MISSION STATUS PILL
+# STATUS PILL
 # =========================================================
 st.subheader("🚀 Mission Status")
-
 if is_anom and severity == "Critical":
     st.markdown(f'<div class="pill pill-crit">🔴 CRITICAL · {subsystem} · {msg}</div>', unsafe_allow_html=True)
 elif is_anom:
@@ -418,80 +382,60 @@ else:
 st.markdown("---")
 
 # =========================================================
-# LIVE TELEMETRY CARDS (HAB-style)
+# LIVE TELEMETRY
 # =========================================================
 st.subheader("📡 Live Telemetry Feed (HAB-style)")
 
 c1, c2, c3, c4 = st.columns(4)
-
 with c1:
     st.markdown(
-        f"""
-        <div class="card">
-          <div class="card-k">🛰️ Altitude</div>
-          <div class="card-v">{sample["Altitude_m"]:.0f}</div>
-          <div class="card-u">meters (AGL approx.)</div>
-        </div>
-        """,
+        f"""<div class="card"><div class="card-k">🛰️ Altitude</div>
+        <div class="card-v">{sample["Altitude_m"]:.0f}</div><div class="card-u">meters (AGL approx.)</div></div>""",
         unsafe_allow_html=True
     )
 with c2:
     st.markdown(
-        f"""
-        <div class="card">
-          <div class="card-k">🌡️ Temperature</div>
-          <div class="card-v">{sample["Temp_C"]:.1f} °C</div>
-          <div class="card-u">payload environment</div>
-        </div>
-        """,
+        f"""<div class="card"><div class="card-k">🌡️ Temperature</div>
+        <div class="card-v">{sample["Temp_C"]:.1f} °C</div><div class="card-u">payload environment</div></div>""",
         unsafe_allow_html=True
     )
 with c3:
     st.markdown(
-        f"""
-        <div class="card">
-          <div class="card-k">🧭 Pressure</div>
-          <div class="card-v">{sample["Pressure_hPa"]:.1f} hPa</div>
-          <div class="card-u">barometric sensor</div>
-        </div>
-        """,
+        f"""<div class="card"><div class="card-k">🧭 Pressure</div>
+        <div class="card-v">{sample["Pressure_hPa"]:.1f} hPa</div><div class="card-u">barometric sensor</div></div>""",
         unsafe_allow_html=True
     )
 with c4:
     st.markdown(
-        f"""
-        <div class="card">
-          <div class="card-k">💧 Humidity</div>
-          <div class="card-v">{sample["Humidity_pct"]:.1f} %</div>
-          <div class="card-u">relative humidity</div>
-        </div>
-        """,
+        f"""<div class="card"><div class="card-k">💧 Humidity</div>
+        <div class="card-v">{sample["Humidity_pct"]:.1f} %</div><div class="card-u">relative humidity</div></div>""",
         unsafe_allow_html=True
     )
 
-# =========================================================
-# TREND CHART
-# =========================================================
+# Trend
 if show_trend:
-    st.subheader(f"📈 Recent Telemetry Trend (last {len(st.session_state.history)} samples)")
-    hist_df = pd.DataFrame(st.session_state.history)
-    # show only numeric columns (avoid time)
-    chart_df = hist_df[["Altitude_m", "Temp_C", "Pressure_hPa", "Humidity_pct", "SNR_dB"]].copy()
-    st.line_chart(chart_df)
+    st.subheader(f"📈 Recent Telemetry Trend (last {len(st.session_state.get('history', []))} samples)")
+    hist_df = pd.DataFrame(st.session_state.get("history", []))
+    if len(hist_df) > 1:
+        chart_df = hist_df[["Altitude_m", "Temp_C", "Pressure_hPa", "Humidity_pct", "SNR_dB"]].copy()
+        st.line_chart(chart_df)
+    else:
+        st.info("Trend will appear after a few samples...")
 
 # =========================================================
-# EVENT LOG (ONCE ONLY)
+# EVENT LOG (ONLY ONCE)
 # =========================================================
 st.subheader("📜 Anomaly Event Log")
-if len(st.session_state.log) > 0:
-    df_log = pd.DataFrame(st.session_state.log)[::-1].reset_index(drop=True)
+log_data = st.session_state.get("log", [])
+if len(log_data) > 0:
+    df_log = pd.DataFrame(log_data)[::-1].reset_index(drop=True)
     st.dataframe(df_log, use_container_width=True, height=280)
 else:
     st.info("No anomalies detected yet (or demo is paused).")
 
 # =========================================================
-# AUTO REFRESH (CLOUD SAFE): sleep + rerun ONCE PER RUN
+# AUTO REFRESH (CLOUD SAFE)
 # =========================================================
-if st.session_state.running and demo_mode != "Hold last values":
+if st.session_state.get("running", True) and demo_mode != "Hold last values":
     time.sleep(refresh_s)
     st.rerun()
